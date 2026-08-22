@@ -1,0 +1,43 @@
+name: MAZEN_RDP_PORTABLE_FINAL
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Setup Windows RDP
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          netsh advfirewall firewall add rule name="AllowRDP" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+      - name: Create User Mazen
+        run: |
+          $password = ConvertTo-SecureString "maAen@3" -AsPlainText -Force
+          if (Get-LocalUser -Name "Mazen" -ErrorAction SilentlyContinue) { Remove-LocalUser -Name "Mazen" }
+          New-LocalUser -Name "Mazen" -Password $password -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "Mazen"
+      - name: Install Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+      - name: Start Connection
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=mazen-pc
+          sleep 5
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          if ($tsIP) { echo "MAZEN_IP=$tsIP" >> $env:GITHUB_ENV } else { echo "MAZEN_IP=NOT_FOUND" >> $env:GITHUB_ENV }
+      - name: Final Data
+        run: |
+          Write-Host "============================="
+          Write-Host "IP Address: $env:MAZEN_IP"
+          Write-Host "User: Mazen"
+          Write-Host "Pass: maAen@3"
+          Write-Host "============================="
+          while ($true) { Start-Sleep -Seconds 300 }
