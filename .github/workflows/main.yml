@@ -15,24 +15,37 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           netsh advfirewall firewall add rule name="AllowRDP" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
+
       - name: Create User Mazen
         run: |
           $password = ConvertTo-SecureString "maAen@3" -AsPlainText -Force
           if (Get-LocalUser -Name "Mazen" -ErrorAction SilentlyContinue) { Remove-LocalUser -Name "Mazen" }
           New-LocalUser -Name "Mazen" -Password $password -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "Mazen"
+
       - name: Install Tailscale
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+
       - name: Start Connection
         run: |
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=mazen-pc
           sleep 5
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           if ($tsIP) { echo "MAZEN_IP=$tsIP" >> $env:GITHUB_ENV } else { echo "MAZEN_IP=NOT_FOUND" >> $env:GITHUB_ENV }
+
+      - name: Send Credentials to Telegram
+        run: |
+          $ip = $env:MAZEN_IP
+          $token = "8885231973:AAElJD7-coQztQ8d15gOZYmPqhkB_SFk_1k"
+          $chatId = "5417796140"
+          $text = "🚀 *Mazen RDP is Ready!*%0A%0A🌐 *IP:* $ip%0A👤 *User:* Mazen%0A🔑 *Pass:* maAen@3"
+          $uri = "https://api.telegram.org/bot$token/sendMessage?chat_id=$chatId&text=$text&parse_mode=Markdown"
+          Invoke-RestMethod -Uri $uri -Method Get
+
       - name: Final Data
         run: |
           Write-Host "============================="
