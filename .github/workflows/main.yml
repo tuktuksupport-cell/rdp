@@ -1,131 +1,43 @@
-name: RDP
+name: MAZEN_RDP_PORTABLE_FINAL
 
 on:
   workflow_dispatch:
 
 jobs:
   secure-rdp:
-    runs-on: windows-2019
+    runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Configure Core RDP Settings
+      - name: Setup Windows RDP
         run: |
-          # Enable Remote Desktop and disable Network Level Authentication (if needed)
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                             -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "SecurityLayer" -Value 0 -Force
-
-          # Remove any existing rule with the same name to avoid duplication
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
-          
-          # For testing, allow any incoming connection on port 3389
-          netsh advfirewall firewall add rule name="RDP-Tailscale" `
-            dir=in action=allow protocol=TCP localport=3389
-
-          # (Optional) Restart the Remote Desktop service to ensure changes take effect
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          netsh advfirewall firewall add rule name="AllowRDP" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
-
-          # Disable Screen Sleep and Lock Screen
-          powercfg -change -standby-timeout-ac 0
-          powercfg -change -monitor-timeout-ac 0
-          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization' -Name "NoLockScreen" -Value 1 -Force
-
-      - name: Create RDP User with Secure Password
+      - name: Create User Mazen
         run: |
-          Add-Type -AssemblyName System.Security
-          $charSet = @{
-              Upper   = [char[]](65..90)      # A-Z
-              Lower   = [char[]](97..122)     # a-z
-              Number  = [char[]](48..57)      # 0-9
-              Special = ([char[]](33..47) + [char[]](58..64) +
-                         [char[]](91..96) + [char[]](123..126)) # Special characters
-          }
-          $rawPassword = @()
-          $rawPassword += $charSet.Upper | Get-Random -Count 4
-          $rawPassword += $charSet.Lower | Get-Random -Count 4
-          $rawPassword += $charSet.Number | Get-Random -Count 4
-          $rawPassword += $charSet.Special | Get-Random -Count 4
-          $password = -join ($rawPassword | Sort-Object { Get-Random })
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-          
-          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
-          
-          if (-not (Get-LocalUser -Name "RDP")) {
-              Write-Error "User creation failed"
-              exit 1
-          }
-
-      - name: Install Google Chrome & Brave Browser
-        run: |
-          Write-Host "Installing Google Chrome..."
-          $ChromeInstaller = "$env:TEMP\chrome_installer.msi"
-          Invoke-WebRequest "https://dl.google.com/chrome/install/latest/chrome_installer.x64.msi" -OutFile $ChromeInstaller
-          Start-Process "msiexec.exe" -ArgumentList "/i `"$ChromeInstaller`" /quiet /norestart" -Wait
-          Remove-Item $ChromeInstaller
-
-          Write-Host "Installing Brave Browser..."
-          $BraveInstaller = "$env:TEMP\brave_installer.exe"
-          Invoke-WebRequest "https://laptop-updates.brave.com/latest/winx64" -OutFile $BraveInstaller
-          Start-Process $BraveInstaller -ArgumentList "--silent --install" -Wait
-          Remove-Item $BraveInstaller
-          Write-Host "Browsers installed successfully!"
-
+          $password = ConvertTo-SecureString "maAen@3" -AsPlainText -Force
+          if (Get-LocalUser -Name "Mazen" -ErrorAction SilentlyContinue) { Remove-LocalUser -Name "Mazen" }
+          New-LocalUser -Name "Mazen" -Password $password -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "Mazen"
       - name: Install Tailscale
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
-          
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
-
-      - name: Establish Tailscale Connection
+      - name: Start Connection
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-          
-          $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
-          }
-          
-          if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
-              exit 1
-          }
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-
-      - name: Send Credentials to Telegram
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=mazen-pc
+          sleep 5
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          if ($tsIP) { echo "MAZEN_IP=$tsIP" >> $env:GITHUB_ENV } else { echo "MAZEN_IP=NOT_FOUND" >> $env:GITHUB_ENV }
+      - name: Final Data
         run: |
-          $msg = "🚀 *Windows 10 RDP is Ready!*%0A%0A🌐 *IP:* `$env:TAILSCALE_IP%0A👤 *User:* `RDP%0A🔑 *Password:* `$env:RDP_CREDS%0A%0A✨ *Installed:* Chrome & Brave"
-          # استخدام المتغيرات بشكل صحيح داخل الباورشيل
-          $ip = $env:TAILSCALE_IP
-          $creds = $env:RDP_CREDS
-          $text = "🚀 Windows 10 RDP is Ready!%0A%0A🌐 IP: $ip%0A👤 User: RDP%0A🔑 $creds%0A%0A✨ Installed: Chrome & Brave"
-          $uri = "https://api.telegram.org/bot$env:TELEGRAM_BOT_TOKEN/sendMessage?chat_id=$env:TELEGRAM_CHAT_ID&text=$text&parse_mode=Markdown"
-          Invoke-RestMethod -Uri $uri -Method Get
-
-      - name: Maintain Connection
-        run: |
-          Write-Host "`n=== RDP ACCESS ==="
-          Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
-          Write-Host "==================`n"
-          
-          while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
-              Start-Sleep -Seconds 300
-          }
+          Write-Host "============================="
+          Write-Host "IP Address: $env:MAZEN_IP"
+          Write-Host "User: Mazen"
+          Write-Host "Pass: maAen@3"
+          Write-Host "============================="
+          while ($true) { Start-Sleep -Seconds 300 }
