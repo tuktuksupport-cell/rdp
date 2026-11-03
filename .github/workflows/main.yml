@@ -49,24 +49,23 @@ jobs:
           $chatId = $env:TELEGRAM_CHAT_ID
           $startTime = Get-Date
 
-          # كتابة هيكل الـ JSON يدوياً وبشكل مضمون لمنع أخطاء تيليجرام
           $jsonBody = @"
-          {
-            "chat_id": "$chatId",
-            "text": "🚀 *Mazen RDP is Ready!*%0A%0A🌐 *IP:* $tsIP%0A👤 *User:* Mazen%0A🔑 *Pass:* maAen@3%0A⏱ *وقت التشغيل:* 0 دقائق",
-            "parse_mode": "Markdown",
-            "reply_markup": {
-              "inline_keyboard": [
-                [
-                  {
-                    "text": "🛑 إيقاف السيرفر الآن",
-                    "callback_data": "stop_server"
-                  }
-                ]
-              ]
-            }
-          }
-          "@
+{
+  "chat_id": "$chatId",
+  "text": "🚀 *Mazen RDP is Ready!*%0A%0A🌐 *IP:* $tsIP%0A👤 *User:* Mazen%0A🔑 *Pass:* maAen@3%0A⏱ *وقت التشغيل:* 0 دقائق",
+  "parse_mode": "Markdown",
+  "reply_markup": {
+    "inline_keyboard": [
+      [
+        {
+          "text": "🛑 إيقاف السيرفر الآن",
+          "callback_data": "stop_server"
+        }
+      ]
+    ]
+  }
+}
+"@
 
           $sendUri = "https://api.telegram.org/bot$token/sendMessage"
           $response = Invoke-RestMethod -Uri $sendUri -Method Post -Body $jsonBody -ContentType "application/json"
@@ -81,28 +80,27 @@ jobs:
               $timeStr = "$mins دقيقة و $secs ثانية"
 
               $updateJsonBody = @"
-              {
-                "chat_id": "$chatId",
-                "message_id": $messageId,
-                "text": "🚀 *Mazen RDP يعمل حالياً*%0A%0A🌐 *IP:* $tsIP%0A👤 *User:* Mazen%0A🔑 *Pass:* maAen@3%0A⏱ *المدة المستهلكة:* $timeStr",
-                "parse_mode": "Markdown",
-                "reply_markup": {
-                  "inline_keyboard": [
-                    [
-                      {
-                        "text": "🛑 إيقاف السيرفر الآن",
-                        "callback_data": "stop_server"
-                      }
-                    ]
-                  ]
-                }
-              }
-              "@
+{
+  "chat_id": "$chatId",
+  "message_id": $messageId,
+  "text": "🚀 *Mazen RDP يعمل حالياً*%0A%0A🌐 *IP:* $tsIP%0A👤 *User:* Mazen%0A🔑 *Pass:* maAen@3%0A⏱ *المدة المستهلكة:* $timeStr",
+  "parse_mode": "Markdown",
+  "reply_markup": {
+    "inline_keyboard": [
+      [
+        {
+          "text": "🛑 إيقاف السيرفر الآن",
+          "callback_data": "stop_server"
+        }
+      ]
+    ]
+  }
+}
+"@
 
               $editUri = "https://api.telegram.org/bot$token/editMessageText"
               try { Invoke-RestMethod -Uri $editUri -Method Post -Body $updateJsonBody -ContentType "application/json" -ErrorAction SilentlyContinue } catch {}
 
-              # التحقق من الضغط على زر الإيقاف
               $updatesUri = "https://api.telegram.org/bot$token/getUpdates?offset=$offset&timeout=1"
               try {
                   $updates = Invoke-RestMethod -Uri $updatesUri -Method Get
