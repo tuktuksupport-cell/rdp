@@ -1,0 +1,124 @@
+name: MAZEN_RDP_PORTABLE_FINAL
+
+on:
+  repository_dispatch:
+    types: [start_rdp]
+  workflow_dispatch:
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Setup Windows RDP
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          netsh advfirewall firewall add rule name="AllowRDP" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+      - name: Create User Mazen
+        run: |
+          $password = ConvertTo-SecureString "maAen@3" -AsPlainText -Force
+          if (Get-LocalUser -Name "Mazen" -ErrorAction SilentlyContinue) { Remove-LocalUser -Name "Mazen" }
+          New-LocalUser -Name "Mazen" -Password $password -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "Mazen"
+
+      - name: Install Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+
+      - name: Start Connection & Telegram Bot Controller
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=mazen-pc
+          Start-Sleep -Seconds 5
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          if (-not $tsIP) { $tsIP = "NOT_FOUND" }
+
+          $token = $env:TELEGRAM_BOT_TOKEN
+          $chatId = $env:TELEGRAM_CHAT_ID
+          $startTime = Get-Date
+
+          $jsonBody = @"
+{
+  "chat_id": "$chatId",
+  "text": "🚀 *Mazen RDP is Ready!*%0A%0A🌐 *IP:* $tsIP%0A👤 *User:* Mazen%0A🔑 *Pass:* maAen@3%0A⏱ *وقت التشغيل:* 0 دقائق",
+  "parse_mode": "Markdown",
+  "reply_markup": {
+    "inline_keyboard": [
+      [
+        {
+          "text": "🛑 إيقاف السيرفر الآن",
+          "callback_data": "stop_server"
+        }
+      ]
+    ]
+  }
+}
+"@
+
+          $sendUri = "https://api.telegram.org/bot$token/sendMessage"
+          $response = Invoke-RestMethod -Uri $sendUri -Method Post -Body $jsonBody -ContentType "application/json"
+          $messageId = $response.result.message_id
+
+          $offset = 0
+          while ($true) {
+              Start-Sleep -Seconds 10
+              $elapsed = (Get-Date) - $startTime
+              $mins = [int]$elapsed.TotalMinutes
+              $secs = $elapsed.Seconds
+              $timeStr = "$mins دقيقة و $secs ثانية"
+
+              $updateJsonBody = @"
+{
+  "chat_id": "$chatId",
+  "message_id": $messageId,
+  "text": "🚀 *Mazen RDP يعمل حالياً*%0A%0A🌐 *IP:* $tsIP%0A👤 *User:* Mazen%0A🔑 *Pass:* maAen@3%0A⏱ *المدة المستهلكة:* $timeStr",
+  "parse_mode": "Markdown",
+  "reply_markup": {
+    "inline_keyboard": [
+      [
+        {
+          "text": "🛑 إيقاف السيرفر الآن",
+          "callback_data": "stop_server"
+        }
+      ]
+    ]
+  }
+}
+"@
+
+              $editUri = "https://api.telegram.org/bot$token/editMessageText"
+              try { Invoke-RestMethod -Uri $editUri -Method Post -Body $updateJsonBody -ContentType "application/json" -ErrorAction SilentlyContinue } catch {}
+
+              $updatesUri = "https://api.telegram.org/bot$token/getUpdates?offset=$offset&timeout=1"
+              try {
+                  $updates = Invoke-RestMethod -Uri $updatesUri -Method Get
+                  if ($updates.ok -and $updates.result.Count -gt 0) {
+                      foreach ($update in $updates.result) {
+                          $offset = $update.update_id + 1
+                          if ($update.callback_query -and $update.callback_query.data -eq "stop_server") {
+                              $answerUri = "https://api.telegram.org/bot$token/answerCallbackQuery"
+                              $ansBody = @{ callback_query_id = $update.callback_query.id; text = "جاري إيقاف السيرفر وتوفير ساعاتك..."; show_alert = $true } | ConvertTo-Json
+                              Invoke-RestMethod -Uri $answerUri -Method Post -Body $ansBody -ContentType "application/json"
+
+                              $cancelUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:RUN_ID/cancel"
+                              $headers = @{ "Authorization" = "Bearer $env:GH_TOKEN"; "Accept" = "application/vnd.github+json" }
+                              Invoke-RestMethod -Uri $cancelUri -Method Post -Headers $headers
+
+                              exit 0
+                          }
+                      }
+                  }
+              } catch {}
+          }
